@@ -59,7 +59,8 @@ static int resolve(CFArrayRef proxies, CFURLRef target, char *out, size_t cap, i
         }
         const char *scheme = NULL;
         if (type && CFEqual(type,kCFProxyTypeHTTP)) scheme = "http";
-        else if (type && CFEqual(type,kCFProxyTypeHTTPS)) scheme = "https";
+        // This type means an HTTP CONNECT tunnel for HTTPS destinations, not TLS to the proxy.
+        else if (type && CFEqual(type,kCFProxyTypeHTTPS)) scheme = "http";
         else if (type && CFEqual(type,kCFProxyTypeSOCKS)) scheme = "socks5h";
         if (!scheme) continue;
         char host[2048]; int port = 0;

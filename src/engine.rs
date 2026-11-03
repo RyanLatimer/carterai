@@ -68,7 +68,7 @@ impl Backend {
         let token = (self.config().vocab_size - 1) as u32;
         // Exercise aligned and unaligned prefill plus single-token decoding. Distinct Metal
         // pipeline variants compile on demand, so finish them before the composer is enabled.
-        for (i, count) in [32usize, 33].into_iter().enumerate() {
+        for (i, count) in [64usize, 65].into_iter().enumerate() {
             anyhow::ensure!(!models::cancelled(cancel), "Cancelled");
             emit(Event::Status(format!("Preparing GPU kernels… {}/2", i + 1)));
             self.reset();

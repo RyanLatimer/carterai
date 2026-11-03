@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
@@ -19,8 +19,15 @@ jobs:
       MLX_RS_METAL_PATH: ${{ github.workspace }}/target/mlx-metallib
     steps:
       - uses: actions/checkout@v4
+      - name: Select modern Metal compiler
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          xcrun metal --version
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Configure release signing
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -64,6 +71,8 @@ jobs:
         run: scripts/bundle.sh
       - name: Verify bundled MLX resources
         run: dist/Carter.app/Contents/MacOS/Carter --smoke-mlx /tmp/tiny-gpt2
+      - name: Verify Finder-launch system-only proxies and PAC
+        run: scripts/test-system-proxy.sh
       - name: Notarize, staple, and validate Gatekeeper
         if: startsWith(github.ref, 'refs/tags/v')
         env:

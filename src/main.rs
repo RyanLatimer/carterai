@@ -307,12 +307,26 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         .child(
             col().w_full().gap(10.0).child(composer).child(
                 text(format!("●  {}", s.status))
+                    .wrap_anywhere()
                     .font(caption)
                     .color(if s.failed { c.danger.fg } else { c.text_muted }),
             ),
         )
 }
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--check-downloads-report") {
+        let path = std::env::args().nth(2).expect("report path required");
+        let result = models::check_downloads();
+        let report = match &result {
+            Ok(()) => "OK".to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        let _ = std::fs::write(path, report);
+        if result.is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--benchmark") {
         if let Err(e) = benchmark::run_from_args(&std::env::args().skip(2).collect::<Vec<_>>()) {
             eprintln!("{e:#}");
