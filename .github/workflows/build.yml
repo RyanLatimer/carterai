@@ -102,9 +102,17 @@ jobs:
           path: dist/Carter-Apple-Silicon.zip
           retention-days: 30
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: performance-reports
           path: dist/performance
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: network-diagnostics
+          path: ~/Library/Application Support/CarterAI/network.log
+          if-no-files-found: ignore
       - name: Publish download
         if: startsWith(github.ref, 'refs/tags/v')
         env:

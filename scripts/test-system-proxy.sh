@@ -36,7 +36,7 @@ done < "$work/services"
 # a private completion file because open -W itself does not propagate the app's status.
 report="$work/static.result"
 open -W -n -a "$PWD/dist/Carter.app" --args --check-downloads-report "$report"
-test "$(cat "$report")" = OK
+if [[ "$(cat "$report")" != OK ]]; then cat "$report" >&2; exit 1; fi
 grep -q 'CONNECT huggingface.co' "$work/connect.log"
 cp "$work/connect.log" dist/performance/system-proxy.log
 : > "$work/connect.log"
@@ -47,6 +47,6 @@ while IFS= read -r service; do
 done < "$work/services"
 report="$work/pac.result"
 open -W -n -a "$PWD/dist/Carter.app" --args --check-downloads-report "$report"
-test "$(cat "$report")" = OK
+if [[ "$(cat "$report")" != OK ]]; then cat "$report" >&2; exit 1; fi
 grep -q 'CONNECT huggingface.co' "$work/connect.log"
 cp "$work/connect.log" dist/performance/pac-proxy.log
