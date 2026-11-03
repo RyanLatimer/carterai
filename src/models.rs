@@ -58,10 +58,7 @@ impl Model {
     pub fn download(&self, cancel: &Cancel, mut status: impl FnMut(String)) -> Result<PathBuf> {
         let dir = cache_dir()?.join(self.id);
         fs::create_dir_all(&dir)?;
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .timeout(std::time::Duration::from_secs(7200))
-            .build()?;
+        let client = download_client()?;
         for file in ["config.json", "tokenizer.json", "model.safetensors"] {
             if cancelled(cancel) {
                 bail!("Cancelled");
@@ -79,7 +76,12 @@ impl Model {
                     "https://huggingface.co/openai-community/{}/resolve/{}/{}",
                     self.id, self.rev, file
                 );
-                let mut response = client.get(url).send()?.error_for_status()?;
+                let mut response = client
+                    .get(url)
+                    .send()
+                    .map_err(reqwest::Error::without_url)?
+                    .error_for_status()
+                    .map_err(reqwest::Error::without_url)?;
                 let total = response
                     .content_length()
                     .unwrap_or(if file == "model.safetensors" {
@@ -103,12 +105,16 @@ impl Model {
                     sha.update(&buf[..n]);
                     count += n as u64;
                     if count - reported >= 4 * 1024 * 1024 || count == total {
-                        status(format!(
-                            "Downloading {} · {:.0} / {:.0} MB",
-                            self.name,
-                            count as f64 / 1e6,
-                            total as f64 / 1e6
-                        ));
+                        if file == "model.safetensors" {
+                            status(format!(
+                                "Downloading {} · {:.0} / {:.0} MB",
+                                self.name,
+                                count as f64 / 1e6,
+                                total as f64 / 1e6
+                            ));
+                        } else {
+                            status(format!("Downloading {} · {file}", self.name));
+                        }
                         reported = count;
                     }
                 }
@@ -135,4 +141,69 @@ pub fn load_config(path: &Path) -> Result<crate::gpt2::Config> {
     Ok(serde_json::from_reader(fs::File::open(
         path.join("config.json"),
     )?)?)
+}
+
+fn download_client() -> Result<reqwest::blocking::Client> {
+    let builder = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(7200))
+        .user_agent(concat!("Carter/", env!("CARGO_PKG_VERSION")));
+    // Honor macOS Keychain trust and system proxy settings, including managed networks.
+    // Certificate and hostname verification remain enabled.
+    #[cfg(target_os = "macos")]
+    let builder = builder.use_native_tls();
+    Ok(builder.build()?)
+}
+
+/// Check metadata, tokenizers, and redirected weight endpoints with the app's HTTP stack.
+/// Read only the safetensors header length, never the multi-GB weight body.
+pub fn check_downloads() -> Result<()> {
+    let client = download_client()?;
+    for model in &MODELS {
+        for file in ["config.json", "tokenizer.json", "model.safetensors"] {
+            let url = format!(
+                "https://huggingface.co/openai-community/{}/resolve/{}/{file}",
+                model.id, model.rev
+            );
+            let mut request = client.get(url).timeout(std::time::Duration::from_secs(60));
+            if file == "model.safetensors" {
+                request = request.header(reqwest::header::RANGE, "bytes=0-7");
+            }
+            let mut response = request
+                .send()
+                .map_err(reqwest::Error::without_url)
+                .with_context(|| format!("{} {file}: connection failed", model.id))?
+                .error_for_status()
+                .map_err(reqwest::Error::without_url)?;
+            if file == "model.safetensors" {
+                let mut bytes = [0u8; 8];
+                response.read_exact(&mut bytes)?;
+                anyhow::ensure!(
+                    (1..10_000_000).contains(&u64::from_le_bytes(bytes)),
+                    "Invalid safetensors header"
+                );
+            } else {
+                let value: serde_json::Value = serde_json::from_reader(response)?;
+                anyhow::ensure!(value.is_object(), "Invalid JSON for {file}");
+            }
+            println!("Download check OK: {} {file}", model.id);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn transport_errors_do_not_hide_the_cause_behind_a_long_url() {
+        let client = super::download_client().unwrap();
+        let error = client
+            .get("invalid://example.com/a/very/long/model/url")
+            .send()
+            .unwrap_err()
+            .without_url();
+        assert!(error.url().is_none());
+        assert!(!error.to_string().contains("example.com"));
+        assert!(std::error::Error::source(&error).is_some());
+    }
 }

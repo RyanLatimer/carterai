@@ -310,6 +310,13 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         )
 }
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--check-downloads") {
+        if let Err(e) = models::check_downloads() {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--smoke") {
         let path = std::env::args()
             .nth(2)

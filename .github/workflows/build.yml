@@ -28,6 +28,8 @@ jobs:
         run: cargo test --locked
       - name: Build native Metal app
         run: cargo build --release --locked
+      - name: Verify model downloads with the app HTTP client
+        run: target/release/carterai --check-downloads
       - name: Verify real-weight Metal inference
         run: |
           mkdir -p /tmp/tiny-gpt2
