@@ -2,6 +2,12 @@
 
 Minimal local GPT-2 chat for Apple Silicon, written in Rust using Anomaly's Rune and native OpenCode components. No webview, account, telemetry, or cloud inference.
 
+## Download
+
+Grab the latest build from [Releases](https://github.com/RyanLatimer/carterai/releases). Unzip `Carter-Apple-Silicon.zip` and move `Carter.app` to Applications. Requires an Apple Silicon Mac (M1 or newer) and macOS 14+.
+
+There is no Apple Developer ID for this project, so the download is ad-hoc signed and not notarized. On first launch, use System Settings → Privacy & Security → Open Anyway. If macOS reports the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Carter.app` first, then open it. Only do that for the copy downloaded from this repository.
+
 The empty state shows only “A little less intelligent.” Streaming messages wrap, do not animate their layout, and respect a reader's scroll position.
 
 ## Models
@@ -45,7 +51,7 @@ open dist/Carter.app
 
 The MLX shader library must be copied into Contents/Resources; the app resolves that bundle path, not a build-machine path. GitHub Actions tests numerical parity, actual Hugging Face access, fixed-workload cold/warm timings, bundle resources, and LaunchServices launches through system-only static and PAC proxies with proxy environment variables removed.
 
-Development builds are ad-hoc signed and **not notarized**. A Developer ID is not available for this project. Normal `v*` releases fail closed unless all five encrypted Actions secrets are configured: DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_BASE64 (base64 `.p8`), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Releases use hardened-runtime Developer ID signatures, notarytool submission, stapling, and spctl assessment before publishing. The bundle identifier remains `app.carter.localchat`.
+Development builds are ad-hoc signed and **not notarized**. A Developer ID is not available for this project. Development tags (`v*-dev`) run the full test suite, package the app, and publish a prerelease automatically without signing secrets. Normal `v*` releases fail closed unless all five encrypted Actions secrets are configured: DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_BASE64 (base64 `.p8`), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Releases use hardened-runtime Developer ID signatures, notarytool submission, stapling, and spctl assessment before publishing. The bundle identifier remains `app.carter.localchat`.
 
 ## Credits
 

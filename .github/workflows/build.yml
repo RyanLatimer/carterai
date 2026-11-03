@@ -32,7 +32,7 @@ jobs:
           cache-workspace-crates: true
           cache-directories: target/mlx-metallib
       - name: Configure release signing
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dev')
         env:
           DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
           DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
@@ -80,7 +80,7 @@ jobs:
         run: swift scripts/icon.swift
       - name: Bundle and sign
         env:
-          DEVELOPMENT_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '0' || '1' }}
+          DEVELOPMENT_BUILD: ${{ (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dev')) && '0' || '1' }}
         run: scripts/bundle.sh
       - name: Verify bundled MLX resources
         run: |
@@ -91,7 +91,7 @@ jobs:
       - name: Verify Finder-launch system-only proxies and PAC
         run: scripts/test-system-proxy.sh
       - name: Notarize, staple, and validate Gatekeeper
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-dev')
         env:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
@@ -121,7 +121,9 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/Carter-Apple-Silicon.zip --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/Carter-Apple-Silicon.zip --title "Carter $GITHUB_REF_NAME" --notes-file RELEASE.md --verify-tag
+            args=(--title "Carter $GITHUB_REF_NAME" --notes-file RELEASE.md --verify-tag)
+            if [[ "$GITHUB_REF_NAME" == *-dev ]]; then args+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" dist/Carter-Apple-Silicon.zip "${args[@]}"
           fi
       - name: Remove temporary signing credentials
         if: always()

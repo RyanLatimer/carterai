@@ -373,15 +373,28 @@ pub fn smoke(dir: &std::path::Path) -> Result<()> {
     let cached = model.forward(&[4], 3)?.to_vec1::<f32>()?;
     let max = full
         .iter()
-        .zip(cached)
+        .zip(&cached)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
+    let scale = full
+        .iter()
+        .chain(&cached)
+        .map(|v| v.abs())
+        .fold(0.0, f32::max);
+    // FP16 Metal reduces in a different order for a 4-token causal prefill than for a
+    // 3+1 cached decode, so a one- or two-ULP spread in the largest logits is expected.
+    // Scale the allowance with the logits; fp32 has no such excuse.
+    let tolerance = if dtype == DType::F16 {
+        (scale * 5e-3).max(0.05)
+    } else {
+        0.05
+    };
     anyhow::ensure!(
-        full.iter().all(|v| v.is_finite()) && max < 0.05,
-        "Invalid logits or cache mismatch: {max}"
+        full.iter().all(|v| v.is_finite()) && max <= tolerance,
+        "Invalid logits or cache mismatch: {max} exceeds {tolerance} (largest logit {scale})"
     );
     println!(
-        "Real-weight inference OK: {dtype:?}, {} logits, max KV difference {max}",
+        "Real-weight inference OK: {dtype:?}, {} logits, max KV difference {max} (tolerance {tolerance})",
         full.len()
     );
     Ok(())

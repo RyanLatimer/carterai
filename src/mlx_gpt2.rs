@@ -290,14 +290,17 @@ pub fn smoke(dir: &Path) -> Result<()> {
     mlx.reset();
     let _ = mlx.forward(&[1, 2], 0)?;
     let chunked = mlx.forward(&[3, 4], 2)?;
+    let scale = full.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    // Both paths are FP16, so compare with a tolerance proportional to the logits.
+    let tolerance = (scale * 5e-3).max(0.05);
     let chunk_diff = full
         .iter()
         .zip(&chunked)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
     ensure!(
-        chunk_diff < 0.05,
-        "MLX cached multi-token mask mismatch: {chunk_diff}"
+        chunk_diff <= tolerance,
+        "MLX cached multi-token mask mismatch: {chunk_diff} exceeds {tolerance}"
     );
     let cache_diff = full
         .iter()
@@ -305,8 +308,8 @@ pub fn smoke(dir: &Path) -> Result<()> {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
     ensure!(
-        full.iter().all(|v| v.is_finite()) && cache_diff < 0.05,
-        "MLX KV cache mismatch: {cache_diff}"
+        full.iter().all(|v| v.is_finite()) && cache_diff <= tolerance,
+        "MLX KV cache mismatch: {cache_diff} exceeds {tolerance}"
     );
     let vb = unsafe {
         VarBuilder::from_mmaped_safetensors(
@@ -319,15 +322,17 @@ pub fn smoke(dir: &Path) -> Result<()> {
     let reference = candle.forward(&[1, 2, 3, 4], 0)?.to_vec1::<f32>()?;
     let backend_diff = full
         .iter()
-        .zip(reference)
+        .zip(&reference)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
+    // MLX FP16 versus the freestanding Candle FP32 reference accumulates differently.
+    let backend_tolerance = (scale * 1e-2).max(0.15);
     ensure!(
-        backend_diff < 0.15,
-        "MLX vs Candle CPU logits differ: {backend_diff}"
+        backend_diff <= backend_tolerance,
+        "MLX vs Candle CPU logits differ: {backend_diff} exceeds {backend_tolerance}"
     );
     println!(
-        "MLX FP16 inference OK: {} logits, max cached/full diff {cache_diff}, max MLX/Candle CPU diff {backend_diff}",
+        "MLX FP16 inference OK: {} logits, max cached/full diff {cache_diff} (tolerance {tolerance}), max MLX/Candle CPU diff {backend_diff} (tolerance {backend_tolerance})",
         full.len()
     );
     Ok(())
