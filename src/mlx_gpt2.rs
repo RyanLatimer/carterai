@@ -24,7 +24,7 @@ fn gelu_program() -> Gelu {
             .multiply(x)?
             .multiply(mlx_rs::array!(0.5f32))
     };
-    Box::new(mlx_rs::transforms::compile(function, true))
+    Box::new(mlx_rs::transforms::compile::compile(function, true))
 }
 
 struct Linear {

@@ -184,7 +184,7 @@ pub fn view(s: &State, k: &Kit) -> El {
             .child(
                 Button::new("Open diagnostics")
                     .variant(ButtonVariant::GhostMuted)
-                    .on_press(|s: &mut State| {
+                    .on_press(|_s: &mut State| {
                         if let Ok(path) = crate::network::diagnostics_path() {
                             #[cfg(target_os = "macos")]
                             {
@@ -192,7 +192,7 @@ pub fn view(s: &State, k: &Kit) -> El {
                             }
                             #[cfg(not(target_os = "macos"))]
                             {
-                                s.status = path.display().to_string();
+                                _s.status = path.display().to_string();
                             }
                         }
                     })

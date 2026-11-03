@@ -66,11 +66,11 @@ impl Backend {
     fn warmup(&mut self, cancel: &Cancel, emit: &impl Fn(Event)) -> Result<f64> {
         let start = Instant::now();
         let token = (self.config().vocab_size - 1) as u32;
-        // Exercise aligned and unaligned prefill plus single-token decoding. Distinct Metal
+        // Exercise short, aligned, and unaligned prefill plus single-token decoding. Distinct Metal
         // pipeline variants compile on demand, so finish them before the composer is enabled.
-        for (i, count) in [64usize, 65].into_iter().enumerate() {
+        for (i, count) in [8usize, 64, 65].into_iter().enumerate() {
             anyhow::ensure!(!models::cancelled(cancel), "Cancelled");
-            emit(Event::Status(format!("Preparing GPU kernels… {}/2", i + 1)));
+            emit(Event::Status(format!("Preparing GPU kernels… {}/3", i + 1)));
             self.reset();
             let count = count.min(self.config().n_positions.saturating_sub(1));
             let _ = self.forward(&vec![token; count], 0)?;

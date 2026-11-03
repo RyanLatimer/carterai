@@ -210,7 +210,7 @@ pub fn run(path: &Path, options: Options) -> Result<()> {
         rounds,
         median_decode_tokens_per_second: median_decode,
         median_time_to_first_token_ms: median_ttft,
-        notes: "Synthetic deterministic prompt; fixed-length greedy generation ignores EOS. A fresh KV cache is used for each round. Model load is reported separately. cold_first_round captures the first execution and is excluded from warm medians; each following round starts a fresh KV cache on the already-initialized backend. Prefill includes the full prompt forward pass and logits readback; time to first token also includes greedy selection. Decode includes one-token forward passes, logits readback and greedy selection. No tokenization, UI rendering, or text decoding. GitHub macOS results describe the runner and must not be presented as physical-Mac performance.",
+        notes: "Synthetic deterministic prompt; fixed-length greedy generation ignores EOS. A fresh KV cache is used for each round. Model load is reported separately. System shader caches are not purged; cold means first execution in this process. cold_first_round captures the first execution and is excluded from warm medians; each following round starts a fresh KV cache on the already-initialized backend. Prefill includes the full prompt forward pass and logits readback; time to first token also includes greedy selection. Decode includes one-token forward passes, logits readback and greedy selection. No tokenization, UI rendering, or text decoding. GitHub macOS results describe the runner and must not be presented as physical-Mac performance.",
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())

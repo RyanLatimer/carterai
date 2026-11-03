@@ -43,7 +43,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Test
-        run: cargo test --locked
+        run: cargo test --release --locked
       - name: Build native Metal app
         run: cargo build --release --locked
       - name: Verify model downloads with the app HTTP client

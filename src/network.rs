@@ -205,7 +205,7 @@ impl Http {
                     .no_proxy()
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(Duration::from_secs(20))
-                    .timeout(Duration::from_secs(7200))
+                    .timeout(Duration::from_secs(30))
                     .user_agent(concat!("Carter/", env!("CARGO_PKG_VERSION")));
                 #[cfg(target_os = "macos")]
                 let builder = builder.use_native_tls();

@@ -2,3 +2,5 @@
 /dist
 *.part
 .DS_Store
+
+__pycache__/

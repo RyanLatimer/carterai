@@ -20,31 +20,35 @@ pub fn empty(kit: &Kit) -> El {
 pub fn message(index: usize, user: bool, body: &str, assistant: &str, kit: &Kit) -> El {
     // A new token only rebuilds the live reply. Completed turns reuse their keyed subtree,
     // including Rune's measured text/glyph caches, while still responding to theme changes.
-    memo(format!("message-{index}"), (user, body, assistant), || {
-        col()
-            .key(format!("message-{index}"))
-            .w_full()
-            .min_w(0.0)
-            .gap(6.0)
-            .instant_changes()
-            .child(
-                text(if user { "You" } else { assistant })
-                    .key(format!("message-{index}-author"))
-                    .w_full()
-                    .font(TextStyle::new(12.0, 400.0).lh(18.0))
-                    .color(kit.c.text_muted),
-            )
-            .child(
-                text(if body.is_empty() { "…" } else { body })
-                    .key(format!("message-{index}-body"))
-                    .wrap_anywhere()
-                    .w_full()
-                    .min_w(0.0)
-                    .min_h(24.0)
-                    .font(TextStyle::new(15.0, 400.0).lh(24.0))
-                    .color(kit.c.text_base),
-            )
-    })
+    memo(
+        format!("message-{index}"),
+        (user, body, assistant, kit.c.text_base, kit.c.text_muted),
+        || {
+            col()
+                .key(format!("message-{index}"))
+                .w_full()
+                .min_w(0.0)
+                .gap(6.0)
+                .instant_changes()
+                .child(
+                    text(if user { "You" } else { assistant })
+                        .key(format!("message-{index}-author"))
+                        .w_full()
+                        .font(TextStyle::new(12.0, 400.0).lh(18.0))
+                        .color(kit.c.text_muted),
+                )
+                .child(
+                    text(if body.is_empty() { "…" } else { body })
+                        .key(format!("message-{index}-body"))
+                        .wrap_anywhere()
+                        .w_full()
+                        .min_w(0.0)
+                        .min_h(24.0)
+                        .font(TextStyle::new(15.0, 400.0).lh(24.0))
+                        .color(kit.c.text_base),
+                )
+        },
+    )
 }
 
 pub fn viewport(content: El) -> El {
