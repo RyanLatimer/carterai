@@ -5,12 +5,15 @@ work="$(mktemp -d)"
 python3 scripts/proxy-fixture.py "$work/connect.log" > "$work/proxy.log" 2>&1 &
 fixture_pid=$!
 networksetup -listallnetworkservices | tail -n +2 | sed '/^\*/d' > "$work/services"
+network_changed=0
 cleanup() {
+  if [[ "$network_changed" = 1 ]]; then
   while IFS= read -r service; do
     sudo networksetup -setsecurewebproxystate "$service" off
     sudo networksetup -setwebproxystate "$service" off
     sudo networksetup -setautoproxystate "$service" off
   done < "$work/services"
+  fi
   kill "$fixture_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -20,8 +23,11 @@ for name in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all
 done
 # The runner starts with no managed proxies. Refuse to modify a configured machine.
 while IFS= read -r service; do
-  if networksetup -getsecurewebproxy "$service" | grep -q 'Enabled: Yes'; then echo 'Expected a clean CI VM' >&2; exit 1; fi
+  for kind in -getsecurewebproxy -getwebproxy -getautoproxyurl; do
+    if networksetup "$kind" "$service" | grep -q 'Enabled: Yes'; then echo 'Expected a clean CI VM; existing proxy settings were left untouched' >&2; exit 1; fi
+  done
 done < "$work/services"
+network_changed=1
 while IFS= read -r service; do
   sudo networksetup -setsecurewebproxy "$service" 127.0.0.1 18081
   sudo networksetup -setsecurewebproxystate "$service" on
