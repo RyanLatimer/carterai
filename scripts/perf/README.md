@@ -45,3 +45,8 @@ and does not modify the app. Alternate baseline/current execution order across
 repeated comparisons. Compare warm medians as well as the cold first-trial values.
 A GitHub macOS runner result describes that runner; it cannot stand in for the
 user's physical Mac. JSON includes machine, virtualization and Actions metadata.
+
+`mlx_quantized.rs` is an unintegrated research prototype for affine Q8/Q4
+projection probes. It is not compiled into Carter or selected by Automatic.
+It preserves original downloads and measures projection error and kernel timing;
+full-model quality and throughput would still need validation before adoption.
