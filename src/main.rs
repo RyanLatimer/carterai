@@ -203,7 +203,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
     if s.preferences.open {
         content = content.child(preferences::view(s, k));
     }
-    if s.menu {
+    if s.menu && !s.preferences.open {
         let mut choices = col()
             .w_full()
             .padding(16.0)
@@ -236,17 +236,19 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         }
         content = content.child(choices);
     }
-    if s.messages.is_empty() {
-        content = content.child(chat_view::empty(k));
-    } else {
-        for (index, message) in s.messages.iter().enumerate() {
-            content = content.child(chat_view::message(
-                index,
-                message.user,
-                &message.text,
-                MODELS[s.selected].name,
-                k,
-            ));
+    if !s.preferences.open {
+        if s.messages.is_empty() {
+            content = content.child(chat_view::empty(k));
+        } else {
+            for (index, message) in s.messages.iter().enumerate() {
+                content = content.child(chat_view::message(
+                    index,
+                    message.user,
+                    &message.text,
+                    MODELS[s.selected].name,
+                    k,
+                ));
+            }
         }
     }
     let action = if s.busy {
@@ -303,7 +305,20 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         .padding(28.0)
         .gap(22.0)
         .child(header)
-        .child(chat_view::viewport(content))
+        .child(if s.preferences.open {
+            content
+                .key("preferences-viewport")
+                .w_full()
+                .min_w(0.0)
+                .grow(1.0)
+                .min_h(0.0)
+                .instant_changes()
+                .scroll(rune::ScrollSpec {
+                    stick_bottom: false,
+                })
+        } else {
+            chat_view::viewport(content)
+        })
         .child(
             col().w_full().gap(10.0).child(composer).child(
                 text(format!("●  {}", s.status))
@@ -382,4 +397,34 @@ fn main() {
     spec.setup = Some(setup);
     spec.poll = Some(poll);
     rune::run(spec);
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+    #[test]
+    fn settings_open_at_top_even_after_a_long_conversation() {
+        let mut state = State::default();
+        state.messages = (0..100)
+            .map(|i| Message {
+                user: i % 2 == 0,
+                text: "A long message that fills the transcript. ".repeat(10),
+            })
+            .collect();
+        let mut rt = rune::Runtime::new(state, view, (560.0, 700.0), rune::Env::new(true, 1.0));
+        rt.frame(0.0);
+        rt.update(|s, tx| {
+            s.preferences.open = true;
+            tx.instant();
+        });
+        rt.frame(1.0 / 60.0);
+        let title = rt
+            .presented("preferences-title")
+            .expect("Settings title should be mounted")
+            .0;
+        assert!(
+            title[1] >= 50.0 && title[1] < 180.0,
+            "Settings title must be visible at the top, got {title:?}"
+        );
+    }
 }

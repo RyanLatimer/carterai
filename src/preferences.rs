@@ -46,7 +46,7 @@ pub fn view(s: &State, k: &Kit) -> El {
     let p = &s.preferences;
     let caption = TextStyle::new(12.0, 400.0).lh(18.0);
     let mut panel = col().key("preferences").w_full().gap(12.0).padding(18.0).radius(12.0).fill(k.c.layer_02)
-        .child(text("Network & models").font(TextStyle::new(16.0,500.0)).color(k.c.text_base))
+        .child(text("Network & models").key("preferences-title").font(TextStyle::new(16.0,500.0)).color(k.c.text_base))
         .child(text("Automatic: macOS system proxies and PAC. Environment variables override saved settings.").wrap_anywhere().font(caption).color(k.c.text_muted));
     macro_rules! field {
         ($label:expr,$name:ident,$placeholder:expr) => {

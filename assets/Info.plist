@@ -11,5 +11,6 @@
 <key>CFBundleIconFile</key><string>Carter</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+<key>NSLocalNetworkUsageDescription</key><string>Carter connects to your configured network proxy to download models.</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

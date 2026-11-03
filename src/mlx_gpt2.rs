@@ -182,7 +182,11 @@ impl MlxGpt2 {
         let stream = Stream::new_with_device(&Device::gpu());
         mlx_rs::with_stream(&stream, || {
             let config = crate::models::load_config(dir)?;
-            let arrays = Array::load_safetensors(dir.join("model.safetensors"))?;
+            // File I/O primitives run on MLX's CPU stream; GPU casts/operations
+            // then depend on those arrays without trying to execute Load on Metal.
+            let arrays = mlx_rs::with_stream(&Stream::cpu(), || {
+                Array::load_safetensors(dir.join("model.safetensors"))
+            })?;
             let prefix = if arrays.contains_key("wte.weight") {
                 ""
             } else {

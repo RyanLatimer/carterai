@@ -69,7 +69,7 @@ static int resolve(CFArrayRef proxies, CFURLRef target, char *out, size_t cap, i
         if (!string(name,host,sizeof(host)) || !number || !CFNumberGetValue(number,kCFNumberIntType,&port) || port <= 0 || port > 65535) {
             snprintf(out,cap,"Invalid system proxy host or port"); return -1;
         }
-        int n = snprintf(out,cap,strchr(host,':') ? "%s://[%s]:%d" : "%s://%s:%d",scheme,host,port);
+        int n = snprintf(out,cap,(strchr(host,':') && host[0] != '[') ? "%s://[%s]:%d" : "%s://%s:%d",scheme,host,port);
         if (n < 0 || (size_t)n >= cap) { snprintf(out,cap,"System proxy address too long"); return -1; }
         return 1;
     }

@@ -81,7 +81,11 @@ jobs:
           DEVELOPMENT_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '0' || '1' }}
         run: scripts/bundle.sh
       - name: Verify bundled MLX resources
-        run: dist/Carter.app/Contents/MacOS/Carter --smoke-mlx /tmp/tiny-gpt2
+        run: |
+          mv target/mlx-metallib/mlx.metallib /tmp/carter-build.metallib
+          trap 'mv /tmp/carter-build.metallib target/mlx-metallib/mlx.metallib' EXIT
+          dist/Carter.app/Contents/MacOS/Carter --smoke-mlx /tmp/tiny-gpt2
+          otool -L dist/Carter.app/Contents/MacOS/Carter
       - name: Verify Finder-launch system-only proxies and PAC
         run: scripts/test-system-proxy.sh
       - name: Notarize, staple, and validate Gatekeeper

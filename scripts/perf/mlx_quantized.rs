@@ -121,7 +121,7 @@ pub fn probe(dir: &Path) -> Result<serde_json::Value> {
     crate::mlx_gpt2::MlxGpt2::configure_library()?;
     let stream = Stream::new_with_device(&Device::gpu());
     mlx_rs::with_stream(&stream, || {
-        let mut weights = Array::load_safetensors(dir.join("model.safetensors"))?;
+        let mut weights = mlx_rs::with_stream(&Stream::cpu(), || Array::load_safetensors(dir.join("model.safetensors")))?;
         let prefix = if weights.contains_key("h.0.attn.c_attn.weight") {
             ""
         } else {
