@@ -20,7 +20,7 @@ GPT-2 is a 2019 completion model. Expect strange answers. Chats are held in memo
 
 ## Inference
 
-Two native FP16 GPU implementations: Candle 0.11.1 Metal (dedicated GEMV and fused attention) and MLX. Select the backend in Settings; Automatic uses the benchmark-selected default documented in the release. Kernels warm on the worker before the composer becomes ready. Both paths use fixed-capacity KV caches, and unchanged conversation prefixes are reused across turns. The status reports first-token time separately from steady decode throughput. Benchmarks report cold first execution and warm trials separately; see [performance tooling](scripts/perf/README.md).
+Two native FP16 GPU implementations: Candle 0.11.1 Metal (dedicated GEMV and fused attention) and MLX. Automatic uses Candle Metal, which measured roughly 4× MLX's decode throughput in the CI benchmark; MLX remains selectable in Settings. Kernels warm on the worker before the composer becomes ready. Both paths use fixed-capacity KV caches, and unchanged conversation prefixes are reused across turns. The status reports first-token time separately from steady decode throughput. Benchmarks report cold first execution and warm trials separately; see [performance tooling](scripts/perf/README.md).
 
 ## Network & offline use
 

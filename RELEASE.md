@@ -2,7 +2,7 @@ Carter 0.2.0 development build for Apple Silicon.
 
 - Fixes streamed-text flicker, transient role markers, text wrapping, and scrolling while reading older messages.
 - Keeps only “A little less intelligent.” in the empty state.
-- Adds optimized Candle Metal inference and native MLX, GPU warmup before Ready, cross-turn KV reuse, and separate first-token/decode timing.
+- Adds optimized Candle Metal inference and native MLX, GPU warmup before Ready, cross-turn KV reuse, and separate first-token/decode timing. Automatic uses Candle Metal, which measured about 4× MLX's decode throughput on the CI M1 runner; MLX remains selectable.
 - Adds macOS system proxy/PAC resolution, HTTPS Keychain trust, manual proxy/endpoint/token settings, offline mode, and local model-folder import.
 - Adds resumable downloads with ETag/Content-Range validation, retries, pinned SHA-256 weight verification, and readable diagnostics.
 

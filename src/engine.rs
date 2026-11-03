@@ -35,7 +35,7 @@ struct Engine {
     cached_tokens: Vec<u32>,
 }
 /// Keep the selectable implementations behind the same token-level contract.
-/// `auto` remains Candle until the real-model Mac benchmark establishes a winner.
+/// `auto` uses Candle Metal, which won the real-model Mac benchmark.
 enum Backend {
     Candle(Gpt2),
     #[cfg(target_os = "macos")]
