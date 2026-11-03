@@ -1,0 +1,35 @@
+[package]
+name = "mlx-sys"
+version = "0.7.0"
+authors.workspace = true
+edition.workspace = true
+
+description = "Low-level interface and binding generation for the mlx library"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+# Exposes build-script metadata to dependents as DEP_MLX_* (see README.md).
+links = "mlx"
+
+[package.metadata.docs.rs]
+targets = [
+  "aarch64-apple-darwin",
+  "aarch64-apple-ios",
+  "aarch64-apple-ios-sim",
+]
+
+[features]
+default = ["accelerate", "metal"]
+
+accelerate = []
+metal = []
+metal-jit = ["metal"]
+
+[dependencies]
+
+[build-dependencies]
+bindgen.workspace = true
+cmake.workspace = true
+cc.workspace = true

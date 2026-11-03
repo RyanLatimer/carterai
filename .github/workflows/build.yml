@@ -28,6 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-directories: target/mlx-metallib
       - name: Configure release signing
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -61,8 +62,18 @@ jobs:
           base=https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e
           curl --fail --location --retry 3 "$base/config.json" -o /tmp/gpt2-small/config.json
           curl --fail --location --retry 3 "$base/model.safetensors" -o /tmp/gpt2-small/model.safetensors
+          target/release/carterai --smoke /tmp/gpt2-small
+          target/release/carterai --smoke-mlx /tmp/gpt2-small
           target/release/carterai --benchmark /tmp/gpt2-small --tokens 32 --prompt-tokens 32 --rounds 3 > dist/performance/candle.json
           target/release/carterai --bench-mlx /tmp/gpt2-small > dist/performance/mlx.json
+      - name: Benchmark default GPT-2 Large
+        run: |
+          mkdir -p /tmp/gpt2-large
+          base=https://huggingface.co/openai-community/gpt2-large/resolve/32b71b12589c2f8d625668d2335a01cac3249519
+          curl --fail --location --retry 3 "$base/config.json" -o /tmp/gpt2-large/config.json
+          curl --fail --location --retry 3 "$base/model.safetensors" -o /tmp/gpt2-large/model.safetensors
+          target/release/carterai --benchmark /tmp/gpt2-large --tokens 32 --prompt-tokens 32 --rounds 3 > dist/performance/candle-large.json
+          target/release/carterai --bench-mlx /tmp/gpt2-large > dist/performance/mlx-large.json
       - name: Create icon
         run: swift scripts/icon.swift
       - name: Bundle and sign

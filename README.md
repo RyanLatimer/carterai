@@ -1,41 +1,52 @@
 # Carter
 
-A minimalist, local AI chat app for Apple Silicon. Rust, Anomaly's [Rune](https://github.com/anomalyco/rune), native `rune-kit` OpenCode components, and the official `rune-theme-opencode` theme. No webview, cloud inference, API keys, analytics, or accounts.
+Minimal local GPT-2 chat for Apple Silicon, written in Rust using Anomaly's Rune and native OpenCode components. No webview, account, telemetry, or cloud inference.
 
-## Download
-
-Get **Carter-Apple-Silicon.zip** from [Releases](../../releases/latest), unzip, and drag **Carter.app** to Applications. Requires an M1 or newer Mac running macOS 14+. See [installation notes](RELEASE.md) for first-launch Gatekeeper instructions; builds are ad-hoc signed and not notarized.
+The empty state shows only “A little less intelligent.” Streaming messages wrap, do not animate their layout, and respect a reader's scroll position.
 
 ## Models
 
 - **Dumb** — GPT-2 Large (774M), default; 3.25 GB download.
-- **Dumber** — GPT-2 Medium (355M); optional 1.52 GB download.
-- **Dumbest** — GPT-2 Small (124M); optional 548 MB download.
+- **Dumber** — GPT-2 Medium (355M); optional 1.52 GB.
+- **Dumbest** — GPT-2 Small (124M); optional 548 MB.
 
-Large downloads on first launch. Use the model name in the header to choose another. Download progress, Stop, and Retry are built in. Interrupted downloads restart on retry. Cached models work offline. Weights live in `~/Library/Application Support/CarterAI/models` on macOS; delete a model folder to reclaim space. The app never transmits chat text. New chat clears the conversation; chats are not saved to disk.
+GPT-2 is a 2019 completion model. Expect strange answers. Chats are held in memory only.
 
-GPT-2 completes text rather than following instructions. The chat prompt uses Human/Assistant turns, a sliding 832-token input window, and up to 192 output tokens. Expect strange or inaccurate replies; this is a playful GPT-2 app, not a modern assistant.
+## Inference
 
-## Performance
+Two native FP16 GPU implementations: Candle 0.11.1 Metal (dedicated GEMV and fused attention) and MLX. Select the backend in Settings; Automatic uses the benchmark-selected default documented in the release. Kernels warm on the worker before the composer becomes ready. Both paths use fixed-capacity KV caches, and unchanged conversation prefixes are reused across turns. The status reports first-token time separately from steady decode throughput. Benchmarks report cold first execution and warm trials separately; see [performance tooling](scripts/perf/README.md).
 
-Metal GPU matmuls, FP16 weights/activations, FP32 attention softmax, per-layer KV caching, tied output embeddings, and Accelerate for CPU operations. Loading and token generation run on a dedicated worker so the UI stays responsive; the worker wakes Rune only when state changes. Top-k sampling (40), temperature 0.8, repetition penalty 1.15. No performance numbers are claimed: the app reports measured generation tokens/s after each reply. Recommend 8 GB or more unified memory. Large uses roughly 1.6 GB for FP16 weights plus runtime, caches, and temporary loading memory.
+## Network & offline use
 
-Model downloads use pinned public `openai-community` Hugging Face revisions and verify weight size and SHA-256 before atomic installation. Original model files stay in FP32 on disk. Optional variants download only when selected.
+Settings provides HTTP/HTTPS proxies, NO_PROXY exceptions, HF_ENDPOINT, an optional HF_TOKEN, offline mode, a model-folder picker, and diagnostic access. On macOS, the token is saved in Keychain, never settings.json. Environment variables override saved values:
 
-## Build
+- `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and `NO_PROXY` (lowercase aliases accepted).
+- `HF_ENDPOINT`, `HF_TOKEN`, and `HF_HUB_OFFLINE=1`.
+- `CARTER_BACKEND=candle` or `mlx`.
 
-On Apple Silicon with Xcode Command Line Tools and current stable Rust:
+With no override, CFNetwork resolves the system route for each URL, including static HTTP CONNECT/SOCKS proxies, exclusions, PAC, and the OS's auto-discovery result. PAC failures are reported rather than silently bypassed. HTTPS uses macOS trust. Authentication is attached only to the configured endpoint origin and stripped on cross-origin redirects.
+
+Downloads follow redirects explicitly and log their paths. Interrupted weight downloads resume with Range/If-Range, validate Content-Range and ETag changes, retry with backoff, and verify pinned SHA-256 before installation. Complete imported models are verified too. Carter's cache is `~/Library/Application Support/CarterAI/models`; partial downloads remain there for retry. Carter does not create Hugging Face `.no_exist` markers. Complete pinned Hugging Face snapshot folders are discovered under HF_HUB_CACHE, HF_HOME/hub, or ~/.cache/huggingface/hub. Existing incomplete blobs belonging to another downloader are not modified.
+
+For offline use, select a folder containing the original config.json, tokenizer.json, and model.safetensors, or use a cached model. Offline mode prevents all app download requests. `network.log` is bounded and credential-redacted; no chats are logged.
+
+## Build & validation
+
+Apple Silicon, current stable Rust, Xcode 26.3 Metal compiler:
 
 ```sh
+export MLX_RS_METAL_PATH="$PWD/target/mlx-metallib"
 cargo test --locked
 cargo build --release --locked
 swift scripts/icon.swift
-scripts/bundle.sh
+DEVELOPMENT_BUILD=1 scripts/bundle.sh
 open dist/Carter.app
 ```
 
-GitHub Actions builds on the public `macos-14` ARM64 runner, tests, creates an ad-hoc signed `.app`, and uploads a zip. Version tags (`v*`) publish the zip as a release download. Dependencies and Rune revision are pinned by Cargo.lock. On Linux, `cargo test` exercises a CPU backend; the shipping Mac build requires Metal.
+The MLX shader library must be copied into Contents/Resources; the app resolves that bundle path, not a build-machine path. GitHub Actions tests numerical parity, actual Hugging Face access, fixed-workload cold/warm timings, bundle resources, and LaunchServices launches through system-only static and PAC proxies with proxy environment variables removed.
 
-## Credits & license
+Development builds are ad-hoc signed and **not notarized**. A Developer ID is not available for this project. Normal `v*` releases fail closed unless all five encrypted Actions secrets are configured: DEVELOPER_ID_P12_BASE64, DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_BASE64 (base64 `.p8`), NOTARY_KEY_ID, and NOTARY_ISSUER_ID. Releases use hardened-runtime Developer ID signatures, notarytool submission, stapling, and spctl assessment before publishing. The bundle identifier remains `app.carter.localchat`.
 
-MIT. Rune and its OpenCode theme/components are MIT by Anomaly; embedded Inter and IBM Plex fonts retain their upstream OFL licenses. GPT-2 weights are by OpenAI, distributed by `openai-community` under MIT. See [THIRD_PARTY.md](THIRD_PARTY.md).
+## Credits
+
+MIT. Rune/OpenCode components by Anomaly; Candle by Hugging Face; MLX and its GPT-2 architecture by Apple; GPT-2 weights by OpenAI. Embedded fonts retain their OFL licenses. [Third-party notices](THIRD_PARTY.md).

@@ -43,3 +43,13 @@ IBM Plex is copyright IBM Corp., under SIL Open Font License 1.1.
 https://github.com/IBM/plex/blob/master/LICENSE.txt
 
 Other dependency licenses are recorded by their packages in Cargo.lock.
+
+MLX / mlx-lm GPT-2 architecture (MIT):
+https://github.com/ml-explore/mlx
+https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/gpt2.py
+Copyright (c) 2023 Apple Inc.
+
+mlx-rs bindings (MIT or Apache-2.0):
+https://github.com/oxideai/mlx-rs
+See dependency package licenses. The native GPT-2 implementation follows the
+architecture and Hugging Face weight mapping; no Python interpreter is shipped.

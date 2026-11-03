@@ -38,3 +38,7 @@ mlx-rs = { version = "=0.33.0", features = ["metal", "accelerate"] }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Keep MLX 0.32.2 usable with macOS 14-era Metal compilers.
+[patch.crates-io]
+mlx-sys = { path = "vendor/mlx-sys" }

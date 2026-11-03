@@ -38,6 +38,7 @@ pub fn data_dir() -> Result<PathBuf> {
 }
 impl Settings {
     pub fn load() -> Self {
+        #[allow(unused_mut)]
         let mut s: Self = data_dir()
             .ok()
             .and_then(|d| fs::read(d.join("settings.json")).ok())
