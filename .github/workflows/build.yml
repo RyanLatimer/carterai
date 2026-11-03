@@ -1,0 +1,51 @@
+name: Apple Silicon app
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apple-silicon-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Test
+        run: cargo test --locked
+      - name: Build native Metal app
+        run: cargo build --release --locked
+      - name: Verify real-weight Metal inference
+        run: |
+          mkdir -p /tmp/tiny-gpt2
+          base=https://huggingface.co/hf-internal-testing/tiny-random-gpt2/resolve/71034c5d8bde858ff824298bdedc65515b97d2b9
+          curl --fail --location --retry 3 "$base/config.json" -o /tmp/tiny-gpt2/config.json
+          curl --fail --location --retry 3 "$base/model.safetensors" -o /tmp/tiny-gpt2/model.safetensors
+          target/release/carterai --smoke /tmp/tiny-gpt2
+      - name: Create icon
+        run: swift scripts/icon.swift
+      - name: Bundle and ad-hoc sign
+        run: scripts/bundle.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Carter-Apple-Silicon
+          path: dist/Carter-Apple-Silicon.zip
+          retention-days: 30
+      - name: Publish download
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/Carter-Apple-Silicon.zip --title "Carter $GITHUB_REF_NAME" --notes-file RELEASE.md --verify-tag
