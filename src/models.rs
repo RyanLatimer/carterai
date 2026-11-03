@@ -55,56 +55,157 @@ pub fn cache_dir() -> Result<PathBuf> {
         .join("models"))
 }
 impl Model {
-    pub fn download(&self, cancel: &Cancel, mut status: impl FnMut(String)) -> Result<PathBuf> {
+    fn local_dir(&self, settings: &crate::settings::Settings) -> Result<Option<PathBuf>> {
+        if !settings.import_folder.trim().is_empty() {
+            let root = PathBuf::from(settings.import_folder.trim());
+            let path = if root.join("config.json").is_file() {
+                root
+            } else {
+                root.join(self.id)
+            };
+            anyhow::ensure!(
+                path.join("config.json").is_file(),
+                "Imported folder needs config.json, tokenizer.json, and model.safetensors for {}",
+                self.id
+            );
+            return Ok(Some(path));
+        }
+        let hub = std::env::var_os("HF_HUB_CACHE")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HF_HOME").map(|p| PathBuf::from(p).join("hub")))
+            .or_else(|| {
+                directories::BaseDirs::new().map(|d| d.home_dir().join(".cache/huggingface/hub"))
+            });
+        if let Some(hub) = hub {
+            let p = hub
+                .join(format!("models--openai-community--{}", self.id))
+                .join("snapshots")
+                .join(self.rev);
+            if ["config.json", "tokenizer.json", "model.safetensors"]
+                .iter()
+                .all(|f| p.join(f).is_file())
+            {
+                return Ok(Some(p));
+            }
+        }
+        Ok(None)
+    }
+    fn verify(&self, path: &Path, cancel: &Cancel, mut status: impl FnMut(String)) -> Result<()> {
+        let config = load_config(path)?;
+        let expected_layers = match self.id {
+            "gpt2-large" => 36,
+            "gpt2-medium" => 24,
+            _ => 12,
+        };
+        anyhow::ensure!(
+            config.n_layer == expected_layers && config.vocab_size == 50257,
+            "Model folder does not match {}",
+            self.id
+        );
+        tokenizers::Tokenizer::from_file(path.join("tokenizer.json"))
+            .map_err(|e| anyhow::anyhow!("Invalid tokenizer.json: {e}"))?;
+        status(format!("Verifying {}…", self.name));
+        let file = path.join("model.safetensors");
+        anyhow::ensure!(
+            file.metadata()?.len() == self.bytes,
+            "Wrong model weight size for {}",
+            self.id
+        );
+        let mut file = fs::File::open(file)?;
+        let mut hash = Sha256::new();
+        let mut buf = vec![0u8; 1024 * 1024];
+        loop {
+            if cancelled(cancel) {
+                bail!("Cancelled");
+            }
+            let n = file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buf[..n]);
+        }
+        anyhow::ensure!(
+            format!("{:x}", hash.finalize()) == self.sha,
+            "Model checksum mismatch for {}. Remove the corrupted model.safetensors and retry.",
+            self.id
+        );
+        Ok(())
+    }
+    pub fn download(
+        &self,
+        settings: &crate::settings::Settings,
+        cancel: &Cancel,
+        mut status: impl FnMut(String),
+    ) -> Result<PathBuf> {
+        if let Some(dir) = self.local_dir(settings)? {
+            self.verify(&dir, cancel, &mut status)?;
+            return Ok(dir);
+        }
         let dir = cache_dir()?.join(self.id);
         fs::create_dir_all(&dir)?;
-        let client = download_client()?;
+        let lock = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join("download.lock"))?;
+        fs2::FileExt::try_lock_exclusive(&lock).context(
+            "Another Carter process is using this model; wait for its download to finish",
+        )?;
+        let mut http = crate::network::Http::new(settings)?;
         for file in ["config.json", "tokenizer.json", "model.safetensors"] {
             if cancelled(cancel) {
                 bail!("Cancelled");
             }
             let path = dir.join(file);
-            // Only atomically renamed, fully verified weights are considered cached.
             if path.exists()
                 && (file != "model.safetensors" || path.metadata()?.len() == self.bytes)
             {
                 continue;
             }
-            let part = path.with_extension("part");
-            let result = (|| -> Result<()> {
-                let url = format!(
-                    "https://huggingface.co/openai-community/{}/resolve/{}/{}",
-                    self.id, self.rev, file
-                );
-                let mut response = client
-                    .get(url)
-                    .send()
-                    .map_err(reqwest::Error::without_url)?
-                    .error_for_status()
-                    .map_err(reqwest::Error::without_url)?;
-                let total = response
-                    .content_length()
-                    .unwrap_or(if file == "model.safetensors" {
-                        self.bytes
+            anyhow::ensure!(
+                !settings.offline(),
+                "{} is not cached. Offline mode prevents downloads; import a complete model folder in Network settings.",
+                self.id
+            );
+            let part = if file == "model.safetensors" {
+                dir.join("model.safetensors.incomplete")
+            } else {
+                path.with_extension("part")
+            };
+            // Reuse a partial download created by an older Carter build.
+            if file == "model.safetensors" && !part.exists() && path.with_extension("part").exists()
+            {
+                fs::rename(path.with_extension("part"), &part)?;
+            }
+            let url = format!(
+                "{}/openai-community/{}/resolve/{}/{file}",
+                settings.endpoint()?,
+                self.id,
+                self.rev
+            );
+            let etag_path = part.with_extension("etag");
+            let mut last = None;
+            for attempt in 0..4 {
+                if cancelled(cancel) {
+                    bail!("Cancelled");
+                }
+                status(format!(
+                    "Downloading {} · {file}{}",
+                    self.name,
+                    if attempt > 0 { " (retrying)" } else { "" }
+                ));
+                let result = download_file(
+                    &mut http,
+                    &url,
+                    &part,
+                    &etag_path,
+                    if file == "model.safetensors" {
+                        Some((self.bytes, self.sha))
                     } else {
-                        0
-                    });
-                let mut out = fs::File::create(&part)?;
-                let mut sha = Sha256::new();
-                let (mut count, mut reported) = (0u64, 0u64);
-                let mut buf = [0u8; 256 * 1024];
-                loop {
-                    if cancelled(cancel) {
-                        bail!("Cancelled");
-                    }
-                    let n = response.read(&mut buf)?;
-                    if n == 0 {
-                        break;
-                    }
-                    out.write_all(&buf[..n])?;
-                    sha.update(&buf[..n]);
-                    count += n as u64;
-                    if count - reported >= 4 * 1024 * 1024 || count == total {
+                        None
+                    },
+                    cancel,
+                    |count, total| {
                         if file == "model.safetensors" {
                             status(format!(
                                 "Downloading {} · {:.0} / {:.0} MB",
@@ -112,98 +213,229 @@ impl Model {
                                 count as f64 / 1e6,
                                 total as f64 / 1e6
                             ));
-                        } else {
-                            status(format!("Downloading {} · {file}", self.name));
                         }
-                        reported = count;
+                    },
+                );
+                match result {
+                    Ok(()) => {
+                        fs::rename(&part, &path)?;
+                        let _ = fs::remove_file(&etag_path);
+                        last = None;
+                        break;
+                    }
+                    Err(e) => {
+                        crate::network::record_error(&e);
+                        last = Some(e);
+                        if cancelled(cancel) {
+                            bail!("Cancelled");
+                        }
+                        if attempt < 3 {
+                            for _ in 0..(10 * (1 << attempt)) {
+                                if cancelled(cancel) {
+                                    bail!("Cancelled");
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                        }
                     }
                 }
-                if file == "model.safetensors"
-                    && (count != self.bytes || format!("{:x}", sha.finalize()) != self.sha)
-                {
-                    bail!("Download checksum mismatch. Please retry.");
-                }
-                out.sync_all()?;
-                drop(out);
-                fs::rename(&part, &path)?;
-                Ok(())
-            })();
-            if result.is_err() {
-                let _ = fs::remove_file(&part);
             }
-            result.with_context(|| format!("Could not download {file}"))?;
+            if let Some(error) = last {
+                return Err(error).with_context(|| format!("Could not download {file}"));
+            }
         }
+        self.verify(&dir, cancel, &mut status)?;
         Ok(dir)
     }
 }
 
+fn download_file(
+    http: &mut crate::network::Http,
+    url: &str,
+    path: &Path,
+    etag_path: &Path,
+    expected: Option<(u64, &str)>,
+    cancel: &Cancel,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<()> {
+    let mut offset = path.metadata().map(|m| m.len()).unwrap_or(0);
+    if let Some((size, sha)) = expected
+        && offset == size
+    {
+        if hash_file(path, cancel)? == sha {
+            return Ok(());
+        }
+        fs::remove_file(path)?;
+        offset = 0;
+    }
+    let saved_etag = fs::read_to_string(etag_path).ok();
+    let mut response = http.get(
+        url,
+        (offset > 0).then_some((offset, None)),
+        saved_etag.as_deref(),
+    )?;
+    let partial = response.status().as_u16() == 206;
+    let mut total = response
+        .content_length()
+        .map(|n| n + if partial { offset } else { 0 })
+        .unwrap_or(expected.map(|p| p.0).unwrap_or(0));
+    if partial {
+        let range = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|h| h.to_str().ok())
+            .context("Server omitted Content-Range on resumed download")?;
+        let (start, size) = parse_content_range(range)?;
+        anyhow::ensure!(start == offset, "Server returned wrong resume offset");
+        total = size;
+        if let Some(saved) = saved_etag.as_deref()
+            && let Some(current) = response
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|v| v.to_str().ok())
+        {
+            if saved != current {
+                fs::remove_file(path)?;
+                let _ = fs::remove_file(etag_path);
+                bail!("Server ETag changed; restarting download");
+            }
+        }
+    } else {
+        offset = 0;
+    } // A 200 response to Range/If-Range means restart, never append.
+    if let Some((size, _)) = expected {
+        anyhow::ensure!(
+            total == 0 || total == size,
+            "Model server returned an unexpected weight size"
+        );
+        total = size;
+    }
+    if let Some(etag) = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+    {
+        fs::write(etag_path, etag)?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(offset == 0)
+        .append(offset > 0)
+        .open(path)?;
+    let mut count = offset;
+    let mut last = count;
+    let mut buf = vec![0; 256 * 1024];
+    loop {
+        if cancelled(cancel) {
+            bail!("Cancelled; partial download retained");
+        }
+        let n = response
+            .read(&mut buf)
+            .context("Connection interrupted while reading model; partial download retained")?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        count += n as u64;
+        if total > 0 && count > total {
+            file.set_len(0)?;
+            bail!("Server sent too much model data");
+        }
+        if count - last >= 4 * 1024 * 1024 || count == total {
+            progress(count, total);
+            last = count;
+        }
+    }
+    file.sync_all()?;
+    drop(file);
+    anyhow::ensure!(
+        total == 0 || count == total,
+        "Incomplete download ({count}/{total}); retry will resume"
+    );
+    if let Some((size, sha)) = expected {
+        if count != size || hash_file(path, cancel)? != sha {
+            fs::remove_file(path)?;
+            bail!("Model checksum mismatch; corrupted partial removed for retry");
+        }
+    } else {
+        let _: serde_json::Value = serde_json::from_reader(fs::File::open(path)?)
+            .context("Endpoint returned invalid model JSON")?;
+    }
+    Ok(())
+}
+fn hash_file(path: &Path, cancel: &Cancel) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = vec![0; 1024 * 1024];
+    loop {
+        if cancelled(cancel) {
+            bail!("Cancelled");
+        }
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+fn parse_content_range(value: &str) -> Result<(u64, u64)> {
+    let v = value
+        .strip_prefix("bytes ")
+        .context("Invalid Content-Range unit")?;
+    let (range, total) = v.split_once('/').context("Invalid Content-Range")?;
+    let (start, end) = range
+        .split_once('-')
+        .context("Invalid Content-Range bounds")?;
+    let (start, end, total) = (
+        start.parse::<u64>()?,
+        end.parse::<u64>()?,
+        total.parse::<u64>()?,
+    );
+    anyhow::ensure!(start <= end && end < total, "Invalid Content-Range bounds");
+    Ok((start, total))
+}
 pub fn load_config(path: &Path) -> Result<crate::gpt2::Config> {
     Ok(serde_json::from_reader(fs::File::open(
         path.join("config.json"),
     )?)?)
 }
-
-fn download_client() -> Result<reqwest::blocking::Client> {
-    let builder = reqwest::blocking::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(7200))
-        .user_agent(concat!("Carter/", env!("CARGO_PKG_VERSION")));
-    // Honor macOS Keychain trust and system proxy settings, including managed networks.
-    // Certificate and hostname verification remain enabled.
-    #[cfg(target_os = "macos")]
-    let builder = builder.use_native_tls();
-    Ok(builder.build()?)
-}
-
-/// Check metadata, tokenizers, and redirected weight endpoints with the app's HTTP stack.
-/// Read only the safetensors header length, never the multi-GB weight body.
 pub fn check_downloads() -> Result<()> {
-    let client = download_client()?;
+    let settings = crate::settings::Settings::load();
+    let mut http = crate::network::Http::new(&settings)?;
     for model in &MODELS {
         for file in ["config.json", "tokenizer.json", "model.safetensors"] {
             let url = format!(
-                "https://huggingface.co/openai-community/{}/resolve/{}/{file}",
-                model.id, model.rev
+                "{}/openai-community/{}/resolve/{}/{file}",
+                settings.endpoint()?,
+                model.id,
+                model.rev
             );
-            let mut request = client.get(url).timeout(std::time::Duration::from_secs(60));
+            let mut response = http.get(
+                &url,
+                if file == "model.safetensors" {
+                    Some((0, Some(7)))
+                } else {
+                    None
+                },
+                None,
+            )?;
             if file == "model.safetensors" {
-                request = request.header(reqwest::header::RANGE, "bytes=0-7");
-            }
-            let mut response = request
-                .send()
-                .map_err(reqwest::Error::without_url)
-                .with_context(|| format!("{} {file}: connection failed", model.id))?
-                .error_for_status()
-                .map_err(reqwest::Error::without_url)?;
-            if file == "model.safetensors" {
-                let mut bytes = [0u8; 8];
+                let mut bytes = [0; 8];
                 response.read_exact(&mut bytes)?;
                 anyhow::ensure!(
                     (1..10_000_000).contains(&u64::from_le_bytes(bytes)),
                     "Invalid safetensors header"
                 );
             } else {
-                let value: serde_json::Value = serde_json::from_reader(response)?;
-                anyhow::ensure!(value.is_object(), "Invalid JSON for {file}");
+                let _: serde_json::Value = serde_json::from_reader(response)?;
             }
             println!("Download check OK: {} {file}", model.id);
         }
     }
     Ok(())
 }
-
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn transport_errors_do_not_hide_the_cause_behind_a_long_url() {
-        let client = super::download_client().unwrap();
-        let error = client
-            .get("invalid://example.com/a/very/long/model/url")
-            .send()
-            .unwrap_err()
-            .without_url();
-        assert!(error.url().is_none());
-        assert!(!error.to_string().contains("example.com"));
-        assert!(std::error::Error::source(&error).is_some());
-    }
-}
+#[path = "download_tests.rs"]
+mod tests;

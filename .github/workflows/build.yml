@@ -16,10 +16,20 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
       CARGO_TERM_COLOR: always
+      MLX_RS_METAL_PATH: ${{ github.workspace }}/target/mlx-metallib
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Configure release signing
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: scripts/signing-setup.sh
       - name: Verify Apple Silicon runner
         run: test "$(uname -m)" = arm64
       - name: Check formatting
@@ -37,15 +47,38 @@ jobs:
           curl --fail --location --retry 3 "$base/config.json" -o /tmp/tiny-gpt2/config.json
           curl --fail --location --retry 3 "$base/model.safetensors" -o /tmp/tiny-gpt2/model.safetensors
           target/release/carterai --smoke /tmp/tiny-gpt2
+          target/release/carterai --smoke-mlx /tmp/tiny-gpt2
+      - name: Benchmark real GPT-2 Small (cold and warm, both backends)
+        run: |
+          mkdir -p /tmp/gpt2-small dist/performance
+          base=https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e
+          curl --fail --location --retry 3 "$base/config.json" -o /tmp/gpt2-small/config.json
+          curl --fail --location --retry 3 "$base/model.safetensors" -o /tmp/gpt2-small/model.safetensors
+          target/release/carterai --benchmark /tmp/gpt2-small --tokens 32 --prompt-tokens 32 --rounds 3 > dist/performance/candle.json
+          target/release/carterai --bench-mlx /tmp/gpt2-small > dist/performance/mlx.json
       - name: Create icon
         run: swift scripts/icon.swift
-      - name: Bundle and ad-hoc sign
+      - name: Bundle and sign
+        env:
+          DEVELOPMENT_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') && '0' || '1' }}
         run: scripts/bundle.sh
+      - name: Verify bundled MLX resources
+        run: dist/Carter.app/Contents/MacOS/Carter --smoke-mlx /tmp/tiny-gpt2
+      - name: Notarize, staple, and validate Gatekeeper
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: scripts/notarize.sh
       - uses: actions/upload-artifact@v4
         with:
           name: Carter-Apple-Silicon
           path: dist/Carter-Apple-Silicon.zip
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performance-reports
+          path: dist/performance
       - name: Publish download
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -56,3 +89,8 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist/Carter-Apple-Silicon.zip --title "Carter $GITHUB_REF_NAME" --notes-file RELEASE.md --verify-tag
           fi
+      - name: Remove temporary signing credentials
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/carter-signing.keychain-db" ]]; then security delete-keychain "$RUNNER_TEMP/carter-signing.keychain-db"; fi
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary.p8"

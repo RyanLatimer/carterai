@@ -1,10 +1,17 @@
+mod benchmark;
+mod chat_view;
 mod engine;
 mod gpt2;
+#[cfg(target_os = "macos")]
+mod mlx_gpt2;
 mod models;
+mod network;
+mod preferences;
+mod settings;
 
 use engine::{Command, Event, Worker};
 use models::{Cancel, MODELS};
-use rune::{AppSpec, Cx, El, ScrollSpec, TextEdit, TextStyle, Tx, col, el, row, text};
+use rune::{AppSpec, Cx, El, TextEdit, TextStyle, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, TextInput};
 use std::sync::{
     Arc,
@@ -27,6 +34,8 @@ struct State {
     cancel: Cancel,
     menu: bool,
     failed: bool,
+    preferences: preferences::Preferences,
+    error: Option<String>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -42,6 +51,8 @@ impl Default for State {
             cancel: Arc::new(AtomicBool::new(false)),
             menu: false,
             failed: false,
+            preferences: preferences::Preferences::default(),
+            error: None,
         }
     }
 }
@@ -58,7 +69,11 @@ impl State {
         self.cancel = Arc::new(AtomicBool::new(false));
         self.status = format!("Preparing {}…", MODELS[index].name);
         if let Some(w) = &self.worker {
-            let _ = w.tx.send(Command::Load(index, self.cancel.clone()));
+            let _ = w.tx.send(Command::Load(
+                index,
+                self.cancel.clone(),
+                self.preferences.settings.clone(),
+            ));
         }
     }
     fn send(&mut self) {
@@ -76,7 +91,7 @@ impl State {
             prompt.push_str(&m.text);
             prompt.push('\n');
         }
-        prompt.push_str("Assistant:");
+        prompt.push_str("Assistant: ");
         self.messages.push(Message {
             user: false,
             text: String::new(),
@@ -96,13 +111,18 @@ fn setup(s: &mut State, wake: rune::Waker) {
     s.worker = Some(engine::start(wake));
     s.load(0);
 }
-fn poll(s: &mut State, _: f64, _: &mut Tx) -> bool {
+fn poll(s: &mut State, _: f64, tx: &mut Tx) -> bool {
     let events: Vec<_> = s
         .worker
         .as_ref()
         .map(|w| w.rx.try_iter().collect())
         .unwrap_or_default();
     let changed = !events.is_empty();
+    // Async token/status updates replace content atomically; animating their layout makes
+    // lines and the pinned scroll position oscillate while a reply is streaming.
+    if changed {
+        tx.instant();
+    }
     for e in events {
         match e {
             Event::Status(v) => s.status = v,
@@ -126,11 +146,13 @@ fn poll(s: &mut State, _: f64, _: &mut Tx) -> bool {
                 s.busy = false;
                 s.generating = false;
                 s.failed = true;
-                s.status = if s.cancel.load(Ordering::Relaxed) {
-                    "Stopped".into()
+                if s.cancel.load(Ordering::Relaxed) {
+                    s.status = "Stopped".into();
                 } else {
-                    v
-                };
+                    s.error = Some(v);
+                    s.status = "Could not load model — open Settings for details".into();
+                    s.preferences.open = true;
+                }
             }
         }
     }
@@ -139,7 +161,6 @@ fn poll(s: &mut State, _: f64, _: &mut Tx) -> bool {
 fn view(s: &State, cx: &mut Cx<State>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let c = &k.c;
-    let title = TextStyle::new(26.0, 500.0).lh(34.0);
     let body = TextStyle::new(15.0, 400.0).lh(24.0);
     let caption = TextStyle::new(12.0, 400.0).lh(18.0);
     let header = row()
@@ -160,13 +181,28 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .build(k),
         )
         .child(
+            Button::new("Settings")
+                .variant(ButtonVariant::GhostMuted)
+                .on_press_tx(|s: &mut State, tx| {
+                    tx.instant();
+                    s.preferences.open = !s.preferences.open;
+                })
+                .build(k),
+        )
+        .child(
             Button::new("New chat")
                 .variant(ButtonVariant::GhostMuted)
                 .disabled(s.busy)
-                .on_press(|s: &mut State| s.messages.clear())
+                .on_press_tx(|s: &mut State, tx| {
+                    s.messages.clear();
+                    tx.instant();
+                })
                 .build(k),
         );
     let mut content = col().w_full().gap(24.0);
+    if s.preferences.open {
+        content = content.child(preferences::view(s, k));
+    }
     if s.menu {
         let mut choices = col()
             .w_full()
@@ -201,50 +237,16 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         content = content.child(choices);
     }
     if s.messages.is_empty() {
-        content = content.child(
-            col()
-                .w_full()
-                .grow(1.0)
-                .center()
-                .gap(14.0)
-                .child(
-                    text("A little less intelligent.")
-                        .font(title)
-                        .color(c.text_base),
-                )
-                .child(
-                    text("A quiet space to talk to GPT-2.\nOn your Mac. Entirely yours.")
-                        .font(body)
-                        .color(c.text_muted),
-                )
-                .child(
-                    text("GPT-2 completes text. Expect odd answers.")
-                        .font(caption)
-                        .color(c.text_faint),
-                ),
-        );
+        content = content.child(chat_view::empty(k));
     } else {
-        for (i, m) in s.messages.iter().enumerate() {
-            content = content.child(
-                col()
-                    .key(format!("message-{i}"))
-                    .w_full()
-                    .gap(6.0)
-                    .child(
-                        text(if m.user {
-                            "You"
-                        } else {
-                            MODELS[s.selected].name
-                        })
-                        .font(caption)
-                        .color(c.text_muted),
-                    )
-                    .child(
-                        text(if m.text.is_empty() { "…" } else { &m.text })
-                            .font(body)
-                            .color(c.text_base),
-                    ),
-            );
+        for (index, message) in s.messages.iter().enumerate() {
+            content = content.child(chat_view::message(
+                index,
+                message.user,
+                &message.text,
+                MODELS[s.selected].name,
+                k,
+            ));
         }
     }
     let action = if s.busy {
@@ -263,7 +265,10 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         Button::new("Send ↑")
             .variant(ButtonVariant::Submit)
             .disabled(s.input.text.trim().is_empty())
-            .on_press(State::send)
+            .on_press_tx(|s: &mut State, tx| {
+                s.send();
+                tx.instant();
+            })
             .build(k)
     };
     let composer = row()
@@ -283,7 +288,10 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .text_style(body)
                 .disabled(!s.ready || s.busy)
                 .on_edit(|s: &mut State| &mut s.input)
-                .on_submit(|s: &mut State, _| s.send())
+                .on_submit(|s: &mut State, tx| {
+                    s.send();
+                    tx.instant();
+                })
                 .build(k)
                 .grow(1.0),
         )
@@ -295,12 +303,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         .padding(28.0)
         .gap(22.0)
         .child(header)
-        .child(
-            content
-                .grow(1.0)
-                .min_h(0.0)
-                .scroll(ScrollSpec { stick_bottom: true }),
-        )
+        .child(chat_view::viewport(content))
         .child(
             col().w_full().gap(10.0).child(composer).child(
                 text(format!("●  {}", s.status))
@@ -310,6 +313,33 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         )
 }
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--benchmark") {
+        if let Err(e) = benchmark::run_from_args(&std::env::args().skip(2).collect::<Vec<_>>()) {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    if matches!(
+        std::env::args().nth(1).as_deref(),
+        Some("--smoke-mlx" | "--bench-mlx")
+    ) {
+        let path = std::env::args()
+            .nth(2)
+            .expect("MLX check needs model directory");
+        let result = if std::env::args().nth(1).as_deref() == Some("--smoke-mlx") {
+            mlx_gpt2::smoke(std::path::Path::new(&path))
+        } else {
+            mlx_gpt2::benchmark(std::path::Path::new(&path), 32, 32)
+                .map(|report| println!("{}", serde_json::to_string_pretty(&report).unwrap()))
+        };
+        if let Err(e) = result {
+            eprintln!("{e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--check-downloads") {
         if let Err(e) = models::check_downloads() {
             eprintln!("{e:#}");
